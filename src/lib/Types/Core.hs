@@ -166,11 +166,19 @@ data LamBinder (n::S) (l::S) =
 data LamExpr (n::S) where
   LamExpr :: LamBinder n l -> Block l -> LamExpr n
 
+type IxDict = Atom
+
+data IxType (n::S) =
+  IxType (Type n) (IxDict n)
+  deriving (Show, Generic)
+
+type IxBinder = BinderP AtomNameC IxType
+
 data TabLamExpr (n::S) where
-  TabLamExpr :: Binder n l -> Block l -> TabLamExpr n
+  TabLamExpr :: IxBinder n l -> Block l -> TabLamExpr n
 
 data TabPiType (n::S) where
-  TabPiType :: Binder n l -> Type l -> TabPiType n
+  TabPiType :: IxBinder n l -> Type l -> TabPiType n
 
 -- TODO: sometimes I wish we'd written these this way instead:
 --   data NaryLamExpr (n::S) where
@@ -395,6 +403,7 @@ data AtomBinding (n::S) =
    LetBound    (DeclBinding   n)
  | LamBound    (LamBinding    n)
  | PiBound     (PiBinding     n)
+ | IxBound     (IxType        n)
  | MiscBound   (Type          n)
  | SolverBound (SolverBinding n)
  | PtrLitBound PtrType (PtrName n)
@@ -407,6 +416,7 @@ atomBindingType (AtomNameBinding b) = case b of
   LetBound    (DeclBinding _ ty _) -> ty
   LamBound    (LamBinding  _ ty)   -> ty
   PiBound     (PiBinding   _ ty)   -> ty
+  IxBound     (IxType ty _)        -> ty
   MiscBound   ty                   -> ty
   SolverBound (InfVarBound ty _)   -> ty
   SolverBound (SkolemBound ty)     -> ty
@@ -535,6 +545,9 @@ instance BindsOneAtomName LamBinder where
 instance BindsOneAtomName PiBinder where
   binderType (PiBinder _ ty _) = ty
 
+instance BindsOneAtomName IxBinder where
+  binderType (_ :> IxType ty _) = ty
+
 -- === ToBinding ===
 
 class (SubstE Name e, SinkableE e) => ToBinding (e::E) (c::C) | e -> c where
@@ -561,6 +574,9 @@ instance ToBinding Atom AtomNameC where
 instance ToBinding SolverBinding AtomNameC where
   toBinding = toBinding . SolverBound
 
+instance ToBinding IxType AtomNameC where
+  toBinding = toBinding . IxBound
+
 instance (ToBinding e1 c, ToBinding e2 c) => ToBinding (EitherE e1 e2) c where
   toBinding (LeftE  e) = toBinding e
   toBinding (RightE e) = toBinding e
@@ -574,13 +590,13 @@ instance HasArgType PiType where
   argType (PiType (PiBinder _ ty _) _ _) = ty
 
 instance HasArgType TabPiType where
-  argType (TabPiType (_:>ty) _) = ty
+  argType (TabPiType (_:>IxType ty _) _) = ty
 
 instance HasArgType LamExpr where
   argType (LamExpr (LamBinder _ ty _ _) _) = ty
 
 instance HasArgType TabLamExpr where
-  argType (TabLamExpr (_:>ty) _) = ty
+  argType (TabLamExpr (_:>IxType ty _) _) = ty
 
 -- === Pattern synonyms ===
 
@@ -643,10 +659,10 @@ pattern RefTy r a = TC (RefType (Just r) a)
 pattern RawRefTy :: Type n -> Type n
 pattern RawRefTy a = TC (RefType Nothing a)
 
-pattern TabTy :: Binder n l -> Type l -> Type n
+pattern TabTy :: IxBinder n l -> Type l -> Type n
 pattern TabTy b body = TabPi (TabPiType b body)
 
-pattern TabVal :: Binder n l -> Block l -> Atom n
+pattern TabVal :: IxBinder n l -> Block l -> Atom n
 pattern TabVal b body = TabLam (TabLamExpr b body)
 
 pattern TyKind :: Kind n
@@ -1301,7 +1317,7 @@ deriving instance Show (LamExpr n)
 deriving via WrapE LamExpr n instance Generic (LamExpr n)
 
 instance GenericE TabLamExpr where
-  type RepE TabLamExpr = Abs Binder Block
+  type RepE TabLamExpr = Abs IxBinder Block
   fromE (TabLamExpr b block) = Abs b block
   {-# INLINE fromE #-}
   toE   (Abs b block) = TabLamExpr b block
@@ -1370,8 +1386,22 @@ instance SubstE AtomSubstVal PiType
 deriving instance Show (PiType n)
 deriving via WrapE PiType n instance Generic (PiType n)
 
+instance GenericE IxType where
+  type RepE IxType = PairE Type IxDict
+  fromE (IxType ty d) = PairE ty d
+  {-# INLINE fromE #-}
+  toE   (PairE ty d) = IxType ty d
+  {-# INLINE toE #-}
+
+instance SinkableE IxType
+instance HoistableE  IxType
+instance AlphaEqE IxType
+instance AlphaHashableE IxType
+instance SubstE Name IxType
+instance SubstE AtomSubstVal IxType
+
 instance GenericE TabPiType where
-  type RepE TabPiType = Abs Binder Type
+  type RepE TabPiType = Abs IxBinder Type
   fromE (TabPiType b resultTy) = Abs b resultTy
   {-# INLINE fromE #-}
   toE   (Abs b resultTy) = TabPiType b resultTy
@@ -1455,10 +1485,11 @@ instance SubstE Name    SynthCandidates
 instance GenericE AtomBinding where
   type RepE AtomBinding =
      EitherE2
-       (EitherE5
+       (EitherE6
           DeclBinding     -- LetBound
           LamBinding      -- LamBound
           PiBinding       -- PiBound
+          IxType          -- IxBound
           Type            -- MiscBound
           SolverBinding)  -- SolverBound
        (EitherE3
@@ -1470,8 +1501,9 @@ instance GenericE AtomBinding where
     LetBound    x -> Case0 $ Case0 x
     LamBound    x -> Case0 $ Case1 x
     PiBound     x -> Case0 $ Case2 x
-    MiscBound   x -> Case0 $ Case3 x
-    SolverBound x -> Case0 $ Case4 x
+    IxBound     x -> Case0 $ Case3 x
+    MiscBound   x -> Case0 $ Case4 x
+    SolverBound x -> Case0 $ Case5 x
     PtrLitBound x y -> Case1 (Case0 (LiftE x `PairE` y))
     SimpLamBound x y  -> Case1 (Case1 (PairE x y))
     FFIFunBound x y   -> Case1 (Case2 (PairE x y))
@@ -1482,9 +1514,9 @@ instance GenericE AtomBinding where
       Case0 x -> LetBound x
       Case1 x -> LamBound x
       Case2 x -> PiBound  x
-      Case3 x -> MiscBound x
-      Case4 x -> SolverBound x
-      _ -> error "impossible"
+      Case3 x -> IxBound  x
+      Case4 x -> MiscBound x
+      Case5 x -> SolverBound x
     Case1 x' -> case x' of
       Case0 (LiftE x `PairE` y) -> PtrLitBound x y
       Case1 (PairE x y) -> SimpLamBound x y
@@ -1853,6 +1885,7 @@ instance Store (DataConDef n)
 instance Store (Block n)
 instance Store (LamBinder n l)
 instance Store (LamExpr n)
+instance Store (IxType n)
 instance Store (TabLamExpr n)
 instance Store (PiBinding n)
 instance Store (PiBinder n l)

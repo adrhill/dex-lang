@@ -50,8 +50,8 @@ module Syntax (
     SourceName, SourceNameOr (..), UVar (..), UBinder (..), uBinderSourceName,
     UExpr, UExpr' (..), UConDef, UDataDef (..), UDataDefTrail (..), UDecl (..),
     UFieldRowElems, UFieldRowElem (..),
-    ULamExpr (..), UPiExpr (..), UTabLamExpr (..), UTabPiExpr (..),
-    TabLamExpr (..), TabPiType (..),
+    ULamExpr (..), UPiExpr (..), UTabLamExpr (..), UTabPiExpr (..), IxBinder (..),
+    TabLamExpr (..), TabPiType (..), IxType (..),
     UDeclExpr (..), UForExpr (..), UAlt (..),
     UPat, UPat' (..), UPatAnn (..), UPatAnnArrow (..), UFieldRowPat (..),
     UMethodDef (..), UAnnBinder (..),
@@ -111,7 +111,7 @@ module Syntax (
     pattern BinaryLamExpr,
     pattern NothingAtom, pattern JustAtom, pattern AtomicBlock,
     pattern BoolTy, pattern FalseAtom, pattern TrueAtom,
-    (-->), (?-->), (--@), (==>) ) where
+    (-->), (?-->), (--@), (==>)) where
 
 import Data.List.NonEmpty (NonEmpty (..), nonEmpty)
 import Foreign.Ptr

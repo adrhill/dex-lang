@@ -108,10 +108,6 @@ data PrimOp e =
       | VectorBinOp BinOp e e
       | VectorPack [e]               -- List should have exactly vectorWidth elements
       | VectorIndex e e              -- Vector first, index second
-      -- Idx (survives simplification, because we allow it to be backend-dependent)
-      | UnsafeFromOrdinal e e   -- index set, ordinal index. XXX: doesn't check bounds
-      | ToOrdinal e
-      | IdxSetSize e
       | ThrowError e                 -- Hard error (parameterized by result type)
       | ThrowException e             -- Catchable exceptions (unlike `ThrowError`)
       | CastOp e e                   -- Type, then value. See Type.hs for valid coercions.
@@ -150,7 +146,7 @@ traversePrimOp = inline traverse
 {-# INLINABLE traversePrimOp #-}
 
 data PrimHof e =
-        For ForAnn e
+        For ForAnn e e        -- Ix dict, body lambda
       | Tile Int e e          -- dimension number, tiled body, scalar body
       | While e
       | RunReader e e

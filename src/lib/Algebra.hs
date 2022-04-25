@@ -212,7 +212,6 @@ blockAsCPoly (Block _ decls' result') =
     exprAsCPoly :: (EnvReader2 m, SubstReader CPolySubstVal m, Alternative2 m) => Expr o -> m o o (ClampPolynomial o)
     exprAsCPoly e = case e of
       Atom a                    -> intAsCPoly a
-      Op (ToOrdinal ix)         -> indexAsCPoly ix
       Op (ScalarBinOp IAdd x y) -> add  <$> intAsCPoly x <*> intAsCPoly y
       Op (ScalarBinOp ISub x y) -> sub  <$> intAsCPoly x <*> intAsCPoly y
       Op (ScalarBinOp IMul x y) -> mulC <$> intAsCPoly x <*> intAsCPoly y
@@ -310,10 +309,11 @@ ipow x i = foldM imul (IdxRepVal 1) (replicate i x)
 -- them into a realy dex program we need to the conversion-to-ordinal
 -- explicitly.
 emitPolyName :: (Emits n, Builder m, MonadIxCache1 m) => PolyName n -> m n (Atom n)
-emitPolyName v = do
-  getType (Var v) >>= \case
-    IdxRepTy -> return $ Var v
-    ty -> appSimplifiedIxMethod ty simpleToOrdinal (Var v)
+emitPolyName v = undefined
+-- emitPolyName v = do
+--   getType (Var v) >>= \case
+--     IdxRepTy -> return $ Var v
+--     ty -> appSimplifiedIxMethod ty simpleToOrdinal (Var v)
 
 -- === instances ===
 

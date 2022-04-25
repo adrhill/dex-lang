@@ -7,7 +7,7 @@
 module Simplify ( simplifyTopBlock, simplifyTopFunction, SimplifiedBlock (..)
                 , liftSimplifyM, buildBlockSimplified
                 , IxCache, MonadIxCache1, SimpleIxInstance (..)
-                , simplifiedIxInstance, appSimplifiedIxMethod ) where
+                ) where
 
 import Control.Category ((>>>))
 import Control.Monad
@@ -551,10 +551,10 @@ projectDictMethod d i = do
 
 simplifyHof :: Emits o => Hof i -> SimplifyM i o (Atom o)
 simplifyHof hof = case hof of
-  For d lam@(Lam lamExpr) -> do
-    ixTy <- substM $ argType lamExpr
+  For d ixDict lam@(Lam lamExpr) -> do
+    ixTy@(IxType _ ixDict') <- substM $ IxType (argType lamExpr) ixDict
     (lam', Abs b recon) <- simplifyLam lam
-    ans <- liftM Var $ emit $ Hof $ For d lam'
+    ans <- liftM Var $ emit $ Hof $ For d ixDict' lam'
     case recon of
       IdentityRecon -> return ans
       LamRecon reconAbs ->
@@ -645,8 +645,8 @@ exceptToMaybeExpr expr = case expr of
   Op (ThrowException _) -> do
     ty <- substM expr >>= getType
     return $ NothingAtom ty
-  Hof (For ann (Lam (LamExpr b body))) -> do
-    ty <- substM $ binderType b
+  Hof (For ann d (Lam (LamExpr b body))) -> do
+    ty <- substM $ IxType (binderType b) d
     maybes <- buildForAnn (getNameHint b) ann ty \i ->
       extendSubst (b@>Rename i) $ exceptToMaybeBlock body
     catMaybesE maybes
@@ -725,46 +725,6 @@ instance Monad1 m => HoistableState IxCache m where
   hoistState s b s' = case hoist b s' of
     HoistSuccess s'' -> return s''
     HoistFailure _   -> return s
-
-simplifiedIxInstance
-  :: (EnvReader m, MonadIxCache1 m)
-  => Type n -> m n (SimpleIxInstance n)
-simplifiedIxInstance ty = do
-  let key = EKey ty
-  gets (HM.lookup key . fromHashMapE) >>= \case
-    Just a  -> return a
-    Nothing -> {-# SCC simplifyInstance #-} do
-      a <- liftSimplifyM simplifyInstance
-      modify (<> (HashMapE $ HM.singleton key a))
-      return a
-  where
-    simplifyInstance = liftSimplifyM do
-      Abs decls inst <- liftBuilder $ buildScoped $ getIxImpl $ sink ty
-      simpAbs <- buildScoped $ simplifyDecls decls do
-        (s , IdentityReconAbs) <- simplifyLam $ ixSize inst
-        (to, IdentityReconAbs) <- simplifyLam $ toOrdinal inst
-        (fo, IdentityReconAbs) <- simplifyLam $ unsafeFromOrdinal inst
-        return $! IxImpl{ ixSize = s, toOrdinal = to, unsafeFromOrdinal = fo }
-      return $! case simpAbs of
-        Abs simpDecls IxImpl{..} ->
-          SimpleIxInstance
-            (Abs simpDecls $ fromLam ixSize           )
-            (Abs simpDecls $ fromLam toOrdinal        )
-            (Abs simpDecls $ fromLam unsafeFromOrdinal)
-
-    fromLam = \case Lam l -> l; _ -> error "Not a lambda!"
-{-# SCC simplifiedIxInstance #-}
-
-appSimplifiedIxMethod
-  :: (Emits n, Builder m, MonadIxCache1 m)
-  => Type n -> (SimpleIxInstance n -> Abs (Nest Decl) LamExpr n)
-  -> Atom n -> m n (Atom n)
-appSimplifiedIxMethod ty method x = do
-  Abs decls f <- method <$> simplifiedIxInstance ty
-  f' <- emitDecls decls f
-  Distinct <- getDistinct
-  case f' of
-    LamExpr fx' fb' -> emitBlock =<< applySubst (fx' @> SubstVal x) fb'
 
 -- === GHC performance hacks ===
 

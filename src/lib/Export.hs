@@ -101,29 +101,30 @@ prepareFunctionForExport f = do
               return $ Abs (Nest (IBinder v' ity) ibs') allRecons'
 
         typeRecon :: EnvExtender m => ExportType n -> Atom n -> m n (IType, Block n)
-        typeRecon ety v = case ety of
-          ScalarType sbt ->
-            return (Scalar sbt, Block (BlockAnn $ BaseTy $ Scalar sbt) Empty $ Atom v)
-          RectContArrayPtr sbt shape -> do
-              block <- liftBuilder $ buildBlock $ tableAtom (sink v) (sink $ shapeToE shape) [] []
-              return (PtrType (Heap CPU, Scalar sbt), block)
-            where
-              tableAtom :: Emits n => Atom n -> ListE (EitherE AtomName (LiftE Int)) n -> [Atom n] -> [Atom n] -> BuilderM n (Atom n)
-              tableAtom basePtr (ListE shapeTail) is sizes = case shapeTail of
-                (h:t) -> buildTabLam noHint (Fin $ dimSize h) \i ->
-                  tableAtom (sink basePtr) (sink $ ListE t)
-                            (sinkList is ++ [Var i]) (sinkList $ sizes ++ [dimSize h])
-                [] -> do
-                  strides <- reverse . fst <$> scanM (\si st -> dup <$> imul st si)
-                                                     (IdxRepVal 1:reverse (tail sizes)) (IdxRepVal 1)
-                  ords <- flip evalStateT1 mempty $ forM is \i -> do
-                    ity <- getType i
-                    appSimplifiedIxMethod ity simpleToOrdinal i
-                  offset <- foldM iadd (IdxRepVal 0) =<< mapM (uncurry imul) (zip strides ords)
-                  unsafePtrLoad =<< ptrOffset basePtr offset
+        typeRecon ety v = undefined
+        -- typeRecon ety v = case ety of
+        --   ScalarType sbt ->
+        --     return (Scalar sbt, Block (BlockAnn $ BaseTy $ Scalar sbt) Empty $ Atom v)
+        --   RectContArrayPtr sbt shape -> do
+        --       block <- liftBuilder $ buildBlock $ tableAtom (sink v) (sink $ shapeToE shape) [] []
+        --       return (PtrType (Heap CPU, Scalar sbt), block)
+        --     where
+        --       tableAtom :: Emits n => Atom n -> ListE (EitherE AtomName (LiftE Int)) n -> [Atom n] -> [Atom n] -> BuilderM n (Atom n)
+        --       tableAtom basePtr (ListE shapeTail) is sizes = case shapeTail of
+        --         (h:t) -> buildTabLam noHint (Fin $ dimSize h) \i ->
+        --           tableAtom (sink basePtr) (sink $ ListE t)
+        --                     (sinkList is ++ [Var i]) (sinkList $ sizes ++ [dimSize h])
+        --         [] -> do
+        --           strides <- reverse . fst <$> scanM (\si st -> dup <$> imul st si)
+        --                                              (IdxRepVal 1:reverse (tail sizes)) (IdxRepVal 1)
+        --           ords <- flip evalStateT1 mempty $ forM is \i -> do
+        --             ity <- getType i
+        --             appSimplifiedIxMethod ity simpleToOrdinal i
+        --           offset <- foldM iadd (IdxRepVal 0) =<< mapM (uncurry imul) (zip strides ords)
+        --           unsafePtrLoad =<< ptrOffset basePtr offset
 
-              dup x = (x, x)
-              dimSize = \case LeftE n -> Var n; RightE (LiftE n) -> IdxRepVal (fromIntegral n)
+        --       dup x = (x, x)
+        --       dimSize = \case LeftE n -> Var n; RightE (LiftE n) -> IdxRepVal (fromIntegral n)
 
     toExportType :: Fallible m => Type n -> m (ExportType n)
     toExportType ty = case ty of
@@ -139,7 +140,7 @@ prepareFunctionForExport f = do
       where
         go shape = \case
           BaseTy (Scalar sbt) -> Just $ RectContArrayPtr sbt shape
-          TabTy  (b:>Fin n) a -> do
+          TabTy  (b:>IxType (Fin n) _) a -> do
             dim <- case n of
               Var v       -> Just (Left v)
               IdxRepVal s -> Just (Right $ fromIntegral s)

@@ -123,7 +123,7 @@ instance PrettyPrec (Expr n) where
   prettyPrec (App f xs) = atPrec AppPrec $ pApp f <+> spaced (toList xs)
   prettyPrec (TabApp f xs) = atPrec AppPrec $ pApp f <> "." <> dotted (toList xs)
   prettyPrec (Op  op ) = prettyPrec op
-  prettyPrec (Hof (For ann (Lam lamExpr))) =
+  prettyPrec (Hof (For ann _ (Lam lamExpr))) =
     atPrec LowestPrec $ forStr ann <+> prettyLamHelper lamExpr (PrettyFor ann)
   prettyPrec (Hof hof) = prettyPrec hof
   prettyPrec (Case e alts _ _) = prettyPrecCase "case" e alts
@@ -175,6 +175,9 @@ instance PrettyPrec (LamExpr n) where
     LamExpr (LamBinder _ _ arr _) _ ->
       atPrec LowestPrec $ "\\"
       <> prettyLamHelper lamExpr (PrettyLam arr)
+
+instance Pretty (IxType n) where
+  pretty (IxType ty _) = pretty ty
 
 instance Pretty (TabLamExpr n) where pretty = prettyFromPrettyPrec
 instance PrettyPrec (TabLamExpr n) where
@@ -303,8 +306,8 @@ instance Pretty (PiType n) where
     in prettyBinder <> (group $ line <> p arr <+> prettyBody)
 
 instance Pretty (TabPiType n) where
-  pretty (TabPiType b body) = let
-    prettyBinder = prettyBinderHelper b body
+  pretty (TabPiType (b :> IxType ty _) body) = let
+    prettyBinder = prettyBinderHelper (b:>ty) body
     prettyBody = case body of
       Pi subpi -> pretty subpi
       _ -> pLowest body
@@ -328,7 +331,7 @@ prettyLamHelper lamExpr lamType = let
         | lamType == PrettyLam arr' ->
             let (binders', block) = rec next False
             in (thisOne <> binders', unsafeCoerceE block)
-      Block _ Empty (Hof (For ann (Lam next)))
+      Block _ Empty (Hof (For ann _ (Lam next)))
         | lamType == PrettyFor ann ->
             let (binders', block) = rec next False
             in (thisOne <> binders', unsafeCoerceE block)
@@ -866,7 +869,7 @@ prettyExprDefault expr =
 instance PrettyPrec e => Pretty (PrimHof e) where pretty = prettyFromPrettyPrec
 instance PrettyPrec e => PrettyPrec (PrimHof e) where
   prettyPrec hof = case hof of
-    For ann lam -> atPrec LowestPrec $ forStr ann <+> pArg lam
+    For ann _ lam -> atPrec LowestPrec $ forStr ann <+> pArg lam
     _ -> prettyExprDefault $ HofExpr hof
 
 printDouble :: Double -> Doc ann

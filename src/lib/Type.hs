@@ -143,7 +143,7 @@ exprEffects expr = case expr of
     PtrStore _ _  -> return $ oneEffect IOEffect
     _ -> return Pure
   Hof hof -> case hof of
-    For _ f         -> functionEffs f
+    For _ _ f       -> functionEffs f
     Tile _ _ _      -> error "not implemented"
     While body      -> functionEffs body
     Linearize _     -> return Pure  -- Body has to be a pure function
@@ -561,6 +561,10 @@ instance HasType PiType where
       resultTy|:TyKind
     return TyKind
 
+instance CheckableE IxType where
+  checkE (IxType ty d) = do
+    IxType <$> checkE ty <*> checkE d
+
 instance HasType TabPiType where
   getTypeE (TabPiType b resultTy) = do
     checkB b \_ -> resultTy|:TyKind
@@ -654,7 +658,7 @@ typeCheckPrimOp op = case op of
     case fromConstAbs (Abs b restTy) of
       HoistSuccess elTy -> forM_ xs (|: elTy)
       HoistFailure _    -> do
-        idxs <- indices $ argType tabPi
+        idxs <- indices $ binderAnn b
         forMZipped_ xs idxs \x i -> do
           eltTy <- instantiateTabPi tabPi i
           x |: eltTy
@@ -671,9 +675,6 @@ typeCheckPrimOp op = case op of
     ty <- getTypeE x
     y |: ty
     return ty
-  UnsafeFromOrdinal ty i -> ty|:TyKind >> i|:IdxRepTy >> substM ty
-  ToOrdinal i -> getTypeE i $> IdxRepTy
-  IdxSetSize i -> getTypeE i $> IdxRepTy
   Inject i -> do
     TC tc <- getTypeE i
     case tc of
@@ -689,7 +690,7 @@ typeCheckPrimOp op = case op of
       MExtend _ x -> x|:s >> declareEff (RWSEffect Writer $ Just h') $> UnitTy
   IndexRef ref i -> do
     getTypeE ref >>= \case
-      RefTy h (TabTy (b:>iTy) eltTy) -> do
+      RefTy h (TabTy (b:>IxType iTy _) eltTy) -> do
         i' <- checkTypeE iTy i
         eltTy' <- applyAbs (Abs b eltTy) (SubstVal i')
         return $ RefTy h eltTy'
@@ -878,39 +879,41 @@ getMethodType className i = do
 
 typeCheckPrimHof :: Typer m => PrimHof (Atom i) -> m i o (Type o)
 typeCheckPrimHof hof = addContext ("Checking HOF:\n" ++ pprint hof) case hof of
-  For _ f -> do
+  For _ d f -> do
+    -- TODO: check type of Ix dict
+    d' <- substM d
     Pi (PiType (PiBinder b argTy PlainArrow) eff eltTy) <- getTypeE f
     eff' <- liftHoistExcept $ hoist b eff
     declareEffs eff'
-    return $ TabTy (b:>argTy) eltTy
-  Tile dim fT fS -> do
-    (TC (IndexSlice n l), effT, tr) <- getTypeE fT >>= fromNonDepPiType PlainArrow
-    (sTy                , effS, sr) <- getTypeE fS >>= fromNonDepPiType PlainArrow
-    checkAlphaEq n sTy
-    checkAlphaEq effT effS
-    declareEffs effT
-    (leadingIdxTysT, resultTyT) <- fromNaryNonDepTabType (replicate dim ()) tr
-    (leadingIdxTysS, resultTyS) <- fromNaryNonDepTabType (replicate dim ()) sr
-    (dvTy, resultTyT') <- fromNonDepTabType resultTyT
-    checkAlphaEq l dvTy
-    checkAlphaEq (ListE leadingIdxTysT) (ListE leadingIdxTysS)
-    checkAlphaEq resultTyT' resultTyS
-    naryNonDepTabPiType (leadingIdxTysT ++ [n]) resultTyT'
-  PTileReduce baseMonoids n mapping -> do
-    -- mapping : gtid:IdxRepTy -> nthr:IdxRepTy -> (...((ParIndexRange n gtid nthr)=>a, acc{n})..., acc1)
-    ([_gtid, _nthr], Pure, mapResultTy) <-
-      getTypeE mapping >>= fromNaryNonDepPiType [PlainArrow, PlainArrow]
-    (tiledArrTy, accTys) <- fromLeftLeaningConsListTy (length baseMonoids) mapResultTy
-    (_, tileElemTy) <- fromNonDepTabType tiledArrTy
-    -- TOOD: figure out what's going on with threadRange
-    --   let threadRange = TC $ ParIndexRange n (binderAsVar gtid) (binderAsVar nthr)
-    --   checkAlphaEq threadRange threadRange'
-    -- TODO: Check compatibility of baseMonoids and accTys (need to be careful about lifting!)
-    -- PTileReduce n mapping : (n=>a, (acc1, ..., acc{n}))
-    n' <- substM n
-    tabTy <- n' ==> tileElemTy
-    -- PTileReduce n mapping : (n=>a, (acc1, ..., acc{n}))
-    return $ PairTy tabTy $ mkConsListTy accTys
+    return $ TabTy (b:>IxType argTy d') eltTy
+  -- Tile dim fT fS -> do
+  --   (TC (IndexSlice n l), effT, tr) <- getTypeE fT >>= fromNonDepPiType PlainArrow
+  --   (sTy                , effS, sr) <- getTypeE fS >>= fromNonDepPiType PlainArrow
+  --   checkAlphaEq n sTy
+  --   checkAlphaEq effT effS
+  --   declareEffs effT
+  --   (leadingIdxTysT, resultTyT) <- fromNaryNonDepTabType (replicate dim ()) tr
+  --   (leadingIdxTysS, resultTyS) <- fromNaryNonDepTabType (replicate dim ()) sr
+  --   (dvTy, resultTyT') <- fromNonDepTabType resultTyT
+  --   checkAlphaEq l dvTy
+  --   checkAlphaEq (ListE leadingIdxTysT) (ListE leadingIdxTysS)
+  --   checkAlphaEq resultTyT' resultTyS
+  --   naryNonDepTabPiType (leadingIdxTysT ++ [n]) resultTyT'
+  -- PTileReduce baseMonoids n mapping -> do
+  --   -- mapping : gtid:IdxRepTy -> nthr:IdxRepTy -> (...((ParIndexRange n gtid nthr)=>a, acc{n})..., acc1)
+  --   ([_gtid, _nthr], Pure, mapResultTy) <-
+  --     getTypeE mapping >>= fromNaryNonDepPiType [PlainArrow, PlainArrow]
+  --   (tiledArrTy, accTys) <- fromLeftLeaningConsListTy (length baseMonoids) mapResultTy
+  --   (_, tileElemTy) <- fromNonDepTabType tiledArrTy
+  --   -- TOOD: figure out what's going on with threadRange
+  --   --   let threadRange = TC $ ParIndexRange n (binderAsVar gtid) (binderAsVar nthr)
+  --   --   checkAlphaEq threadRange threadRange'
+  --   -- TODO: Check compatibility of baseMonoids and accTys (need to be careful about lifting!)
+  --   -- PTileReduce n mapping : (n=>a, (acc1, ..., acc{n}))
+  --   n' <- substM n
+  --   tabTy <- n' ==> tileElemTy
+  --   -- PTileReduce n mapping : (n=>a, (acc1, ..., acc{n}))
+  --   return $ PairTy tabTy $ mkConsListTy accTys
   While body -> do
     Pi (PiType (PiBinder b UnitTy PlainArrow) eff condTy) <- getTypeE body
     PairE eff' condTy' <- liftHoistExcept $ hoist b $ PairE eff condTy
@@ -1058,7 +1061,8 @@ checkTabApp tabTy xs = go tabTy $ toList xs
     go :: Typer m => Type o -> [Atom i] -> m i o (Type o)
     go ty [] = return ty
     go ty (i:rest) = do
-      TabTy (b:>ixTy) resultTy <- return ty
+      TabTy (b :> IxType ixTy _) resultTy <- return ty
+      -- TODO: check type of Ix dict too
       i' <- checkTypeE ixTy i
       resultTy' <- applySubst (b@>SubstVal i') resultTy
       go resultTy' rest
